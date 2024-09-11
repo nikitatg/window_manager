@@ -40,12 +40,12 @@ extension NSWindow {
 extension NSRect {
     var topLeft: CGPoint {
         set {
-            let screenFrameRect = NSScreen.main!.frame
+            let screenFrameRect = NSScreen.screens[0].frame
             origin.x = newValue.x
             origin.y = screenFrameRect.height - newValue.y - size.height
         }
         get {
-            let screenFrameRect = NSScreen.main!.frame
+            let screenFrameRect = NSScreen.screens[0].frame
             return CGPoint(x: origin.x, y: screenFrameRect.height - origin.y - size.height)
         }
     }
@@ -171,6 +171,22 @@ public class WindowManager: NSObject, NSWindowDelegate {
     
     public func restore() {
         mainWindow.deminiaturize(nil)
+    }
+
+    public func isDockable() -> Bool {
+        return false
+    }
+
+    public func isDocked() -> Int {
+        return 0;
+    }
+    
+    public func dock(_ args: [String: Any]) {
+        if (isDockable()) {}
+    }
+    
+    public func undock() {
+        if (isDockable()) {}
     }
     
     public func isFullScreen() -> Bool {
@@ -417,7 +433,6 @@ public class WindowManager: NSObject, NSWindowDelegate {
             let progressIndicator: NSProgressIndicator = NSProgressIndicator.init(frame: frame)
             progressIndicator.style = .bar
             progressIndicator.isIndeterminate = false
-            progressIndicator.isBezeled = true
             progressIndicator.minValue = 0
             progressIndicator.maxValue = 1
             progressIndicator.isHidden = false

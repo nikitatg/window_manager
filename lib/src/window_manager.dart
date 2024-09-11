@@ -26,6 +26,11 @@ const kWindowEventMoved = 'moved';
 const kWindowEventEnterFullScreen = 'enter-full-screen';
 const kWindowEventLeaveFullScreen = 'leave-full-screen';
 
+const kWindowEventDocked = 'docked';
+const kWindowEventUndocked = 'undocked';
+
+enum DockSide { left, right }
+
 // WindowManager
 class WindowManager {
   WindowManager._() {
@@ -64,6 +69,8 @@ class WindowManager {
         kWindowEventMoved: listener.onWindowMoved,
         kWindowEventEnterFullScreen: listener.onWindowEnterFullScreen,
         kWindowEventLeaveFullScreen: listener.onWindowLeaveFullScreen,
+        kWindowEventDocked: listener.onWindowDocked,
+        kWindowEventUndocked: listener.onWindowUndocked,
       };
       funcMap[eventName]?.call();
     }
@@ -97,6 +104,7 @@ class WindowManager {
     await _channel.invokeMethod('ensureInitialized');
   }
 
+  /// You can call this to remove the window frame (title bar, outline border, etc), which is basically everything except the Flutter view, also can call setTitleBarStyle(TitleBarStyle.normal) or setTitleBarStyle(TitleBarStyle.hidden) to restore it.
   Future<void> setAsFrameless() async {
     await _channel.invokeMethod('setAsFrameless');
   }
@@ -107,6 +115,13 @@ class WindowManager {
     VoidCallback? callback,
   ]) async {
     await _channel.invokeMethod('waitUntilReadyToShow');
+
+    if (options?.titleBarStyle != null) {
+      await setTitleBarStyle(
+        options!.titleBarStyle!,
+        windowButtonVisibility: options.windowButtonVisibility ?? true,
+      );
+    }
 
     if (await isFullScreen()) await setFullScreen(false);
     if (await isMaximized()) await unmaximize();
@@ -131,12 +146,6 @@ class WindowManager {
       await setSkipTaskbar(options!.skipTaskbar!);
     }
     if (options?.title != null) await setTitle(options!.title!);
-    if (options?.titleBarStyle != null) {
-      await setTitleBarStyle(
-        options!.titleBarStyle!,
-        windowButtonVisibility: options.windowButtonVisibility ?? true,
-      );
-    }
 
     if (callback != null) {
       callback();
@@ -252,6 +261,50 @@ class WindowManager {
       'isFullScreen': isFullScreen,
     };
     await _channel.invokeMethod('setFullScreen', arguments);
+    // (Windows) Force refresh the app so it 's back to the correct size
+    // (see GitHub issue #311)
+    if (Platform.isWindows) {
+      final size = await getSize();
+      setSize(size + const Offset(1, 1));
+      setSize(size);
+    }
+  }
+
+  /// Returns `bool` - Whether the window is dockable or not.
+  ///
+  /// @platforms windows
+  Future<bool> isDockable() async {
+    return await _channel.invokeMethod('isDockable');
+  }
+
+  /// Returns `bool` - Whether the window is docked.
+  ///
+  /// @platforms windows
+  Future<DockSide?> isDocked() async {
+    int? docked = await _channel.invokeMethod('isDocked');
+    if (docked == 0) return null;
+    if (docked == 1) return DockSide.left;
+    if (docked == 2) return DockSide.right;
+    return null;
+  }
+
+  /// Docks the window. only works on Windows
+  ///
+  /// @platforms windows
+  Future<void> dock({required DockSide side, required int width}) async {
+    final Map<String, dynamic> arguments = {
+      'left': side == DockSide.left,
+      'right': side == DockSide.right,
+      'width': width,
+    };
+    await _channel.invokeMethod('dock', arguments);
+  }
+
+  /// Undocks the window. only works on Windows
+  ///
+  /// @platforms windows
+  Future<bool> undock() async {
+    return await _channel.invokeMethod('undock');
   }
 
   /// This will make a window maintain an aspect ratio.
@@ -434,7 +487,7 @@ class WindowManager {
 
   /// Returns `bool` - Whether the window can be manually maximized by the user.
   ///
-  /// @platforms windows
+  /// @platforms macos,windows
   Future<bool> isMaximizable() async {
     return await _channel.invokeMethod('isMaximizable');
   }
@@ -504,7 +557,7 @@ class WindowManager {
     bool windowButtonVisibility = true,
   }) async {
     final Map<String, dynamic> arguments = {
-      'titleBarStyle': describeEnum(titleBarStyle),
+      'titleBarStyle': titleBarStyle.name,
       'windowButtonVisibility': windowButtonVisibility,
     };
     await _channel.invokeMethod('setTitleBarStyle', arguments);
@@ -630,7 +683,7 @@ class WindowManager {
   /// Sets the brightness of the window.
   Future<void> setBrightness(Brightness brightness) async {
     final Map<String, dynamic> arguments = {
-      'brightness': describeEnum(brightness),
+      'brightness': brightness.name,
     };
     await _channel.invokeMethod('setBrightness', arguments);
   }
@@ -652,18 +705,22 @@ class WindowManager {
   }
 
   /// Starts a window drag based on the specified mouse-down event.
+  /// On Windows, this is disabled during full screen mode.
   Future<void> startDragging() async {
+    if (Platform.isWindows && await isFullScreen()) return;
     await _channel.invokeMethod('startDragging');
   }
 
   /// Starts a window resize based on the specified mouse-down & mouse-move event.
+  /// On Windows, this is disabled during full screen mode.
   ///
   /// @platforms linux,windows
-  Future<void> startResizing(ResizeEdge resizeEdge) {
-    return _channel.invokeMethod<bool>(
+  Future<void> startResizing(ResizeEdge resizeEdge) async {
+    if (Platform.isWindows && await isFullScreen()) return;
+    await _channel.invokeMethod<bool>(
       'startResizing',
       {
-        'resizeEdge': describeEnum(resizeEdge),
+        'resizeEdge': resizeEdge.name,
         'top': resizeEdge == ResizeEdge.top ||
             resizeEdge == ResizeEdge.topLeft ||
             resizeEdge == ResizeEdge.topRight,

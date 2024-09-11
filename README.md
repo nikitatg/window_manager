@@ -58,6 +58,10 @@ English | [简体中文](./README-ZH.md)
       - [restore](#restore)
       - [isFullScreen](#isfullscreen)
       - [setFullScreen](#setfullscreen)
+      - [isDockable  `windows`](#isdockable--windows)
+      - [isDocked  `windows`](#isdocked--windows)
+      - [dock  `windows`](#dock--windows)
+      - [undock  `windows`](#undock--windows)
       - [setAspectRatio](#setaspectratio)
       - [setBackgroundColor](#setbackgroundcolor)
       - [setAlignment](#setalignment)
@@ -77,13 +81,13 @@ English | [简体中文](./README-ZH.md)
       - [isMinimizable  `macos`  `windows`](#isminimizable--macos--windows)
       - [setMinimizable  `macos`  `windows`](#setminimizable--macos--windows)
       - [isClosable  `windows`](#isclosable--windows)
-      - [isMaximizable `macos` `windows`](#ismaximizable--macos--windows)
+      - [isMaximizable  `macos`  `windows`](#ismaximizable--macos--windows)
       - [setMaximizable](#setmaximizable)
       - [setClosable  `macos`  `windows`](#setclosable--macos--windows)
       - [isAlwaysOnTop](#isalwaysontop)
       - [setAlwaysOnTop](#setalwaysontop)
       - [isAlwaysOnBottom](#isalwaysonbottom)
-      - [setAlwaysOnBottom  `linux` `windows`](#setalwaysonbottom--linux--windows)
+      - [setAlwaysOnBottom  `linux`  `windows`](#setalwaysonbottom--linux--windows)
       - [getTitle](#gettitle)
       - [setTitle](#settitle)
       - [setTitleBarStyle](#settitlebarstyle)
@@ -92,6 +96,9 @@ English | [简体中文](./README-ZH.md)
       - [setSkipTaskbar](#setskiptaskbar)
       - [setProgressBar  `macos`  `windows`](#setprogressbar--macos--windows)
       - [setIcon  `windows`](#seticon--windows)
+      - [isVisibleOnAllWorkspaces  `macos`](#isvisibleonallworkspaces--macos)
+      - [setVisibleOnAllWorkspaces  `macos`](#setvisibleonallworkspaces--macos)
+      - [setBadgeLabel  `macos`](#setbadgelabel--macos)
       - [hasShadow  `macos`  `windows`](#hasshadow--macos--windows)
       - [setHasShadow  `macos`  `windows`](#sethasshadow--macos--windows)
       - [getOpacity](#getopacity)
@@ -117,7 +124,10 @@ English | [简体中文](./README-ZH.md)
       - [onWindowMoved  `macos`  `windows`](#onwindowmoved--macos--windows)
       - [onWindowEnterFullScreen](#onwindowenterfullscreen)
       - [onWindowLeaveFullScreen](#onwindowleavefullscreen)
+      - [onWindowDocked  `windows`](#onwindowdocked--windows)
+      - [onWindowUndocked  `windows`](#onwindowundocked--windows)
       - [onWindowEvent](#onwindowevent)
+- [Contributors](#contributors)
 - [License](#license)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -136,7 +146,7 @@ Add this to your package's `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  window_manager: ^0.3.4
+  window_manager: ^0.4.2
 ```
 
 Or
@@ -494,11 +504,12 @@ class _HomePageState extends State<HomePage> with WindowListener {
 
 ## Articles
 
-- [Click the dock icon to restore after closing the window](https://leanflutter.org/blog/click-dock-icon-to-restore-after-closing-the-window)
-- [Making the app single-instanced](https://leanflutter.org/blog/making-the-app-single-instanced)
+- [Click the dock icon to restore after closing the window](https://leanflutter.dev/tips-and-tricks/002-click-dock-icon-to-restore-after-closing-the-window/)
+- [Making the app single-instanced](https://leanflutter.dev/tips-and-tricks/001-making-the-app-single-instanced/)
 
 ## Who's using it?
 
+- [Airclap](https://airclap.app/) - Send any file to any device. cross platform, ultra fast and easy to use.
 - [AuthPass](https://authpass.app/) - Password Manager based on Flutter for all platforms. Keepass 2.x (kdbx 3.x) compatible.
 - [Biyi (比译)](https://biyidev.com/) - A convenient translation and dictionary app written in dart / Flutter.
 - [BlueBubbles](https://github.com/BlueBubblesApp/bluebubbles-app) - BlueBubbles is an ecosystem of apps bringing iMessage to Android, Windows, and Linux
@@ -506,6 +517,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
 - [Linwood Butterfly](https://github.com/LinwoodCloud/Butterfly) - Open source note taking app written in Flutter
 - [RustDesk](https://github.com/rustdesk/rustdesk) - Yet another remote desktop software, written in Rust. Works out of the box, no configuration required. 
 - [Ubuntu Desktop Installer](https://github.com/canonical/ubuntu-desktop-installer) - This project is a modern implementation of the Ubuntu Desktop installer.
+- [UniControlHub](https://github.com/rohitsangwan01/uni_control_hub) - Seamlessly bridge your Desktop and Mobile devices
 
 ## API
 
@@ -593,6 +605,26 @@ Returns `bool` - Whether the window is in fullscreen mode.
 
 Sets whether the window should be in fullscreen mode.
 
+##### isDockable  `windows`
+
+Returns `bool` - Whether the window is dockable or not.
+
+
+##### isDocked  `windows`
+
+Returns `bool` - Whether the window is docked.
+
+
+##### dock  `windows`
+
+Docks the window. only works on Windows
+
+
+##### undock  `windows`
+
+Undocks the window. only works on Windows
+
+
 ##### setAspectRatio
 
 This will make a window maintain an aspect ratio.
@@ -674,7 +706,7 @@ Sets whether the window can be manually minimized by user.
 Returns `bool` - Whether the window can be manually closed by user.
 
 
-##### isMaximizable  `windows`
+##### isMaximizable  `macos`  `windows`
 
 Returns `bool` - Whether the window can be manually maximized by the user.
 
@@ -869,6 +901,16 @@ Emitted when the window enters a full-screen state.
 ##### onWindowLeaveFullScreen
 
 Emitted when the window leaves a full-screen state.
+
+##### onWindowDocked  `windows`
+
+Emitted when the window entered a docked state.
+
+
+##### onWindowUndocked  `windows`
+
+Emitted when the window leaves a docked state.
+
 
 ##### onWindowEvent
 

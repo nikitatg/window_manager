@@ -1,7 +1,9 @@
 #include "include/window_manager/window_manager_plugin.h"
 
 // This must be included before many other Windows headers.
-#include <windows.h>
+#pragma once
+
+#include <Windows.h>
 
 #include <shobjidl_core.h>
 
@@ -16,13 +18,38 @@
 #include <sstream>
 
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "shcore.lib")
+#pragma comment(lib, "Gdi32.lib")
 
 #define STATE_NORMAL 0
 #define STATE_MAXIMIZED 1
 #define STATE_MINIMIZED 2
 #define STATE_FULLSCREEN_ENTERED 3
+#define STATE_DOCKED 4
 
-#define DWMWA_USE_IMMERSIVE_DARK_MODE 19
+/// Window attribute that enables dark mode window decorations.
+///
+/// Redefined in case the developer's machine has a Windows SDK older than
+/// version 10.0.22000.0.
+/// See:
+/// https://docs.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+
+constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+
+/// Registry key for app theme preference.
+///
+/// A value of 0 indicates apps should use dark mode. A non-zero or missing
+/// value indicates apps should use light mode.
+constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+constexpr const wchar_t kGetPreferredBrightnessRegValue[] =
+    L"AppsUseLightTheme";
+
+#define APPBAR_CALLBACK WM_USER + 0x01;
 
 namespace {
 
@@ -54,6 +81,8 @@ class WindowManager {
   POINT maximum_size_ = {-1, -1};
   double pixel_ratio_ = 1;
   bool is_resizable_ = true;
+  int is_docked_ = 0;
+  bool is_registered_for_docking_ = false;
   bool is_skip_taskbar_ = true;
   std::string title_bar_style_ = "normal";
   double opacity_ = 1;
@@ -82,6 +111,10 @@ class WindowManager {
   bool WindowManager::IsMinimized();
   void WindowManager::Minimize();
   void WindowManager::Restore();
+  bool WindowManager::IsDockable();
+  int WindowManager::IsDocked();
+  void WindowManager::Dock(const flutter::EncodableMap& args);
+  bool WindowManager::Undock();
   bool WindowManager::IsFullScreen();
   void WindowManager::SetFullScreen(const flutter::EncodableMap& args);
   void WindowManager::SetAspectRatio(const flutter::EncodableMap& args);
@@ -122,14 +155,20 @@ class WindowManager {
   void WindowManager::StartResizing(const flutter::EncodableMap& args);
 
  private:
+  static constexpr auto kFlutterViewWindowClassName = L"FLUTTERVIEW";
   bool g_is_window_fullscreen = false;
   std::string g_title_bar_style_before_fullscreen;
-  bool g_is_frameless_before_fullscreen;
   RECT g_frame_before_fullscreen;
   bool g_maximized_before_fullscreen;
   LONG g_style_before_fullscreen;
-  LONG g_ex_style_before_fullscreen;
   ITaskbarList3* taskbar_ = nullptr;
+  double GetDpiForHwnd(HWND hWnd);
+  BOOL WindowManager::RegisterAccessBar(HWND hwnd, BOOL fRegister);
+  void PASCAL WindowManager::AppBarQuerySetPos(HWND hwnd,
+                                               UINT uEdge,
+                                               LPRECT lprc,
+                                               PAPPBARDATA pabd);
+  void WindowManager::DockAccessBar(HWND hwnd, UINT edge, UINT windowWidth);
 };
 
 WindowManager::WindowManager() {}
@@ -231,7 +270,7 @@ void WindowManager::Blur() {
 }
 
 bool WindowManager::IsFocused() {
-  return GetMainWindow() == GetActiveWindow();
+  return GetMainWindow() == GetForegroundWindow();
 }
 
 void WindowManager::Show() {
@@ -303,6 +342,10 @@ bool WindowManager::IsMinimized() {
 }
 
 void WindowManager::Minimize() {
+  if (IsFullScreen()) {  // Like chromium, we don't want to minimize fullscreen
+                         // windows
+    return;
+  }
   HWND mainWindow = GetMainWindow();
   WINDOWPLACEMENT windowPlacement;
   GetWindowPlacement(mainWindow, &windowPlacement);
@@ -322,6 +365,202 @@ void WindowManager::Restore() {
   }
 }
 
+bool WindowManager::IsDockable() {
+  return true;
+}
+
+int WindowManager::IsDocked() {
+  return is_docked_;
+}
+
+double WindowManager::GetDpiForHwnd(HWND hWnd) {
+  auto monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+  UINT newDpiX = 96;  // Default values
+  UINT newDpiY = 96;
+
+  // Dynamically load shcore.dll and get the GetDpiForMonitor function address
+  // We need to do this to ensure Windows 7 support
+  HMODULE shcore = LoadLibrary(TEXT("shcore.dll"));
+  if (shcore) {
+    typedef HRESULT (*GetDpiForMonitor)(HMONITOR, int, UINT*, UINT*);
+
+    GetDpiForMonitor GetDpiForMonitorFunc =
+        (GetDpiForMonitor)GetProcAddress(shcore, "GetDpiForMonitor");
+
+    if (GetDpiForMonitorFunc) {
+      // Use the loaded function if available
+      const int MDT_EFFECTIVE_DPI = 0;
+      if (FAILED(GetDpiForMonitorFunc(monitor, MDT_EFFECTIVE_DPI, &newDpiX,
+                                      &newDpiY))) {
+        // If it fails, set the default values again
+        newDpiX = 96;
+        newDpiY = 96;
+      }
+    }
+    FreeLibrary(shcore);
+  }
+  return ((double)newDpiX);
+}
+
+void WindowManager::Dock(const flutter::EncodableMap& args) {
+  HWND mainWindow = GetMainWindow();
+
+  double dpi = GetDpiForHwnd(mainWindow);
+  double scalingFactor = dpi / 96.0;
+
+  bool left = std::get<bool>(args.at(flutter::EncodableValue("left")));
+  bool right = std::get<bool>(args.at(flutter::EncodableValue("right")));
+  int width = std::get<int>(args.at(flutter::EncodableValue("width")));
+
+  // first register bar
+  RegisterAccessBar(mainWindow, true);
+
+  //
+  UINT edge = ABE_LEFT;
+  if (right && !left) {
+    edge = ABE_RIGHT;
+  }
+
+  UINT uw = static_cast<UINT>(width * scalingFactor + 0.5);
+
+  // dock window
+  DockAccessBar(mainWindow, edge, uw);
+}
+
+bool WindowManager::Undock() {
+  HWND mainWindow = GetMainWindow();
+  bool result = RegisterAccessBar(mainWindow, false);
+  is_docked_ = 0;
+  return result;
+}
+
+void PASCAL WindowManager::AppBarQuerySetPos(HWND hwnd,
+                                             UINT uEdge,
+                                             LPRECT lprc,
+                                             PAPPBARDATA pabd) {
+  int iHeight = 0;
+  int iWidth = 0;
+
+  pabd->hWnd = hwnd;
+  pabd->rc = *lprc;
+  pabd->uEdge = uEdge;
+
+  // Copy the screen coordinates of the appbar's bounding
+  // rectangle into the APPBARDATA structure.
+  if ((uEdge == ABE_LEFT) || (uEdge == ABE_RIGHT)) {
+    iWidth = pabd->rc.right - pabd->rc.left;
+    pabd->rc.top = 0;
+    pabd->rc.bottom = GetSystemMetrics(SM_CYSCREEN);
+  } else {
+    iHeight = pabd->rc.bottom - pabd->rc.top;
+    pabd->rc.left = 0;
+    pabd->rc.right = GetSystemMetrics(SM_CXSCREEN);
+  }
+
+  // Query the system for an approved size and position.
+  SHAppBarMessage(ABM_QUERYPOS, pabd);
+
+  // Adjust the rectangle, depending on the edge to which the appbar is
+  // anchored.
+  switch (uEdge) {
+    case ABE_LEFT:
+      pabd->rc.right = pabd->rc.left + iWidth;
+      break;
+
+    case ABE_RIGHT:
+      pabd->rc.left = pabd->rc.right - iWidth;
+      break;
+
+    case ABE_TOP:
+      pabd->rc.bottom = pabd->rc.top + iHeight;
+      break;
+
+    case ABE_BOTTOM:
+      pabd->rc.top = pabd->rc.bottom - iHeight;
+      break;
+  }
+
+  // Pass the final bounding rectangle to the system.
+  SHAppBarMessage(ABM_SETPOS, pabd);
+
+  // Move and size the appbar so that it conforms to the
+  // bounding rectangle passed to the system.
+  UINT uFlags = NULL;
+  SetWindowPos(hwnd, HWND_TOP, pabd->rc.left, pabd->rc.top,
+               pabd->rc.right - pabd->rc.left, pabd->rc.bottom - pabd->rc.top,
+               uFlags);
+}
+
+BOOL WindowManager::RegisterAccessBar(HWND hwnd, BOOL fRegister) {
+  APPBARDATA abd;
+
+  // Specify the structure size and handle to the appbar.
+  abd.cbSize = sizeof(APPBARDATA);
+  abd.hWnd = hwnd;
+
+  if (fRegister && is_registered_for_docking_) {
+    return false;
+  }
+
+  if (!fRegister && !is_registered_for_docking_) {
+    return false;
+  }
+
+  if (!fRegister && is_registered_for_docking_) {
+    // Unregister the appbar.
+    SHAppBarMessage(ABM_REMOVE, &abd);
+    is_registered_for_docking_ = false;
+    is_docked_ = 0;
+    return true;
+  }
+
+  if (fRegister && !is_registered_for_docking_) {
+    // Provide an identifier for notification messages.
+    abd.uCallbackMessage = APPBAR_CALLBACK;
+
+    // Register the appbar.
+    if (!SHAppBarMessage(ABM_NEW, &abd))
+      return false;
+
+    is_docked_ = 1;  // default edge
+    is_registered_for_docking_ = true;
+    return false;
+  }
+
+  return false;
+}
+
+void WindowManager::DockAccessBar(HWND hwnd, UINT edge, UINT windowWidth) {
+  APPBARDATA abd;
+  RECT lprc;
+
+  lprc.top = 0;
+  lprc.bottom = 0;
+
+  if (edge == ABE_LEFT) {
+    lprc.left = 0;
+    lprc.right = windowWidth;
+  } else {
+    lprc.left = GetSystemMetrics(SM_CXSCREEN) - windowWidth;
+    lprc.right = GetSystemMetrics(SM_CXSCREEN);
+  }
+
+  // Specify the structure size and handle to the appbar.
+  abd.cbSize = sizeof(APPBARDATA);
+  abd.hWnd = hwnd;
+  abd.uCallbackMessage = APPBAR_CALLBACK;
+
+  AppBarQuerySetPos(hwnd, edge, &lprc, &abd);
+
+  if (edge == ABE_LEFT) {
+    is_docked_ = 1;
+  } else if (edge == ABE_RIGHT) {
+    is_docked_ = 2;
+  }
+
+  return;
+}
+
 bool WindowManager::IsFullScreen() {
   return g_is_window_fullscreen;
 }
@@ -332,79 +571,69 @@ void WindowManager::SetFullScreen(const flutter::EncodableMap& args) {
 
   HWND mainWindow = GetMainWindow();
 
-  // Inspired by how Chromium does this
+  // Previously inspired by how Chromium does this
   // https://src.chromium.org/viewvc/chrome/trunk/src/ui/views/win/fullscreen_handler.cc?revision=247204&view=markup
+  // Instead, we use a modified implementation of how the media_kit package
+  // implements this (we got permission from the author, I believe)
+  // https://github.com/alexmercerind/media_kit/blob/1226bcff36eab27cb17d60c33e9c15ca489c1f06/media_kit_video/windows/utils.cc
 
   // Save current window state if not already fullscreen.
   if (!g_is_window_fullscreen) {
     // Save current window information.
-    g_maximized_before_fullscreen = !!::IsZoomed(mainWindow);
+    g_maximized_before_fullscreen = ::IsZoomed(mainWindow);
     g_style_before_fullscreen = GetWindowLong(mainWindow, GWL_STYLE);
-    g_ex_style_before_fullscreen = GetWindowLong(mainWindow, GWL_EXSTYLE);
-    if (g_maximized_before_fullscreen) {
-      SendMessage(mainWindow, WM_SYSCOMMAND, SC_RESTORE, 0);
-    }
     ::GetWindowRect(mainWindow, &g_frame_before_fullscreen);
     g_title_bar_style_before_fullscreen = title_bar_style_;
-    g_is_frameless_before_fullscreen = is_frameless_;
-  }
-
-  if (isFullScreen) {
-    flutter::EncodableMap args2 = flutter::EncodableMap();
-    args2[flutter::EncodableValue("titleBarStyle")] =
-        flutter::EncodableValue("normal");
-    SetTitleBarStyle(args2);
-
-    // Set new window style and size.
-    ::SetWindowLong(mainWindow, GWL_STYLE,
-                    g_style_before_fullscreen & ~(WS_CAPTION | WS_THICKFRAME));
-    ::SetWindowLong(mainWindow, GWL_EXSTYLE,
-                    g_ex_style_before_fullscreen &
-                        ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE |
-                          WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
-
-    MONITORINFO monitor_info;
-    monitor_info.cbSize = sizeof(monitor_info);
-    ::GetMonitorInfo(::MonitorFromWindow(mainWindow, MONITOR_DEFAULTTONEAREST),
-                     &monitor_info);
-    ::SetWindowPos(mainWindow, NULL, monitor_info.rcMonitor.left,
-                   monitor_info.rcMonitor.top,
-                   monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
-                   monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
-                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    ::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-  } else {
-    ::SetWindowLong(mainWindow, GWL_STYLE, g_style_before_fullscreen);
-    ::SetWindowLong(mainWindow, GWL_EXSTYLE, g_ex_style_before_fullscreen);
-
-    SendMessage(mainWindow, WM_SYSCOMMAND, SC_RESTORE, 0);
-
-    if (title_bar_style_ != g_title_bar_style_before_fullscreen) {
-      flutter::EncodableMap args2 = flutter::EncodableMap();
-      args2[flutter::EncodableValue("titleBarStyle")] =
-          flutter::EncodableValue(g_title_bar_style_before_fullscreen);
-      SetTitleBarStyle(args2);
-    }
-
-    if (g_is_frameless_before_fullscreen)
-      SetAsFrameless();
-
-    if (g_maximized_before_fullscreen) {
-      flutter::EncodableMap args2 = flutter::EncodableMap();
-      args2[flutter::EncodableValue("vertically")] =
-          flutter::EncodableValue(false);
-      Maximize(args2);
-    } else {
-      ::SetWindowPos(
-          mainWindow, NULL, g_frame_before_fullscreen.left,
-          g_frame_before_fullscreen.top,
-          g_frame_before_fullscreen.right - g_frame_before_fullscreen.left,
-          g_frame_before_fullscreen.bottom - g_frame_before_fullscreen.top,
-          SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    }
   }
 
   g_is_window_fullscreen = isFullScreen;
+
+  if (isFullScreen) {  // Set to fullscreen
+    ::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    if (!is_frameless_) {
+      auto monitor = MONITORINFO{};
+      auto placement = WINDOWPLACEMENT{};
+      monitor.cbSize = sizeof(MONITORINFO);
+      placement.length = sizeof(WINDOWPLACEMENT);
+      ::GetWindowPlacement(mainWindow, &placement);
+      ::GetMonitorInfo(
+          ::MonitorFromWindow(mainWindow, MONITOR_DEFAULTTONEAREST), &monitor);
+      ::SetWindowLongPtr(mainWindow, GWL_STYLE,
+                         g_style_before_fullscreen & ~WS_OVERLAPPEDWINDOW);
+      ::SetWindowPos(mainWindow, HWND_TOP, monitor.rcMonitor.left,
+                     monitor.rcMonitor.top,
+                     monitor.rcMonitor.right - monitor.rcMonitor.left,
+                     monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+  } else {  // Restore from fullscreen
+    if (!g_maximized_before_fullscreen)
+      Restore();
+    ::SetWindowLongPtr(mainWindow, GWL_STYLE,
+                       g_style_before_fullscreen | WS_OVERLAPPEDWINDOW);
+    if (::IsZoomed(mainWindow)) {
+      // Refresh the parent mainWindow.
+      ::SetWindowPos(mainWindow, nullptr, 0, 0, 0, 0,
+                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_FRAMECHANGED);
+      auto rect = RECT{};
+      ::GetClientRect(mainWindow, &rect);
+      auto flutter_view = ::FindWindowEx(mainWindow, nullptr,
+                                         kFlutterViewWindowClassName, nullptr);
+      ::SetWindowPos(flutter_view, nullptr, rect.left, rect.top,
+                     rect.right - rect.left, rect.bottom - rect.top,
+                     SWP_NOACTIVATE | SWP_NOZORDER);
+      if (g_maximized_before_fullscreen)
+        PostMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    } else {
+      ::SetWindowPos(
+          mainWindow, nullptr, g_frame_before_fullscreen.left,
+          g_frame_before_fullscreen.top,
+          g_frame_before_fullscreen.right - g_frame_before_fullscreen.left,
+          g_frame_before_fullscreen.bottom - g_frame_before_fullscreen.top,
+          SWP_NOACTIVATE | SWP_NOZORDER);
+    }
+  }
 }
 
 void WindowManager::SetAspectRatio(const flutter::EncodableMap& args) {
@@ -635,22 +864,16 @@ void WindowManager::SetAlwaysOnTop(const flutter::EncodableMap& args) {
 }
 
 bool WindowManager::IsAlwaysOnBottom() {
-    return is_always_on_bottom_;
+  return is_always_on_bottom_;
 }
 
 void WindowManager::SetAlwaysOnBottom(const flutter::EncodableMap& args) {
   is_always_on_bottom_ =
       std::get<bool>(args.at(flutter::EncodableValue("isAlwaysOnBottom")));
 
-  SetWindowPos(
-    GetMainWindow(),
-    is_always_on_bottom_ ? HWND_BOTTOM : HWND_NOTOPMOST,
-    0,
-    0,
-    0,
-    0,
-    SWP_NOMOVE | SWP_NOSIZE
-  );
+  SetWindowPos(GetMainWindow(),
+               is_always_on_bottom_ ? HWND_BOTTOM : HWND_NOTOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE);
 }
 
 std::string WindowManager::GetTitle() {
@@ -797,14 +1020,21 @@ void WindowManager::SetOpacity(const flutter::EncodableMap& args) {
 }
 
 void WindowManager::SetBrightness(const flutter::EncodableMap& args) {
-  std::string brightness =
-      std::get<std::string>(args.at(flutter::EncodableValue("brightness")));
+  DWORD light_mode;
+  DWORD light_mode_size = sizeof(light_mode);
+  LSTATUS result =
+      RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
+                  kGetPreferredBrightnessRegValue, RRF_RT_REG_DWORD, nullptr,
+                  &light_mode, &light_mode_size);
 
-  const BOOL is_dark_mode = brightness == "dark";
-
-  HWND hWnd = GetMainWindow();
-  DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &is_dark_mode,
-                        sizeof(is_dark_mode));
+  if (result == ERROR_SUCCESS) {
+    std::string brightness =
+        std::get<std::string>(args.at(flutter::EncodableValue("brightness")));
+    HWND hWnd = GetMainWindow();
+    BOOL enable_dark_mode = light_mode == 0 && brightness == "dark";
+    DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                          &enable_dark_mode, sizeof(enable_dark_mode));
+  }
 }
 
 void WindowManager::SetIgnoreMouseEvents(const flutter::EncodableMap& args) {
@@ -842,6 +1072,7 @@ void WindowManager::PopUpWindowMenu(const flutter::EncodableMap& args) {
 
 void WindowManager::StartDragging() {
   ReleaseCapture();
+  Undock();
   SendMessage(GetMainWindow(), WM_SYSCOMMAND, SC_MOVE | HTCAPTION, 0);
 }
 
@@ -852,6 +1083,7 @@ void WindowManager::StartResizing(const flutter::EncodableMap& args) {
   bool right = std::get<bool>(args.at(flutter::EncodableValue("right")));
 
   HWND hWnd = GetMainWindow();
+  Undock();
   ReleaseCapture();
   LONG command;
   if (top && !bottom && !right && !left) {

@@ -1,4 +1,4 @@
-abstract class WindowListener {
+abstract mixin class WindowListener {
   /// Emitted when the window is going to be closed.
   void onWindowClose() {}
 
@@ -41,6 +41,16 @@ abstract class WindowListener {
 
   /// Emitted when the window leaves a full-screen state.
   void onWindowLeaveFullScreen() {}
+
+  /// Emitted when the window entered a docked state.
+  ///
+  /// @platforms windows
+  void onWindowDocked() {}
+
+  /// Emitted when the window leaves a docked state.
+  ///
+  /// @platforms windows
+  void onWindowUndocked() {}
 
   /// Emitted all events.
   void onWindowEvent(String eventName) {}

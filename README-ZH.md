@@ -1,6 +1,6 @@
 # window_manager
 
-[![pub version][pub-image]][pub-url] [![][discord-image]][discord-url] ![][visits-count-image] [![All Contributors][all-contributors-image]](#contributors)
+[![pub version][pub-image]][pub-url] [![][discord-image]][discord-url] [![All Contributors][all-contributors-image]](#contributors)
 
 [pub-image]: https://img.shields.io/pub/v/window_manager.svg
 [pub-url]: https://pub.dev/packages/window_manager
@@ -8,7 +8,6 @@
 [discord-image]: https://img.shields.io/discord/884679008049037342.svg
 [discord-url]: https://discord.gg/zPa6EZ2jqb
 
-[visits-count-image]: https://img.shields.io/badge/dynamic/json?label=Visits%20Count&query=value&url=https://api.countapi.xyz/hit/leanflutter.window_manager/visits
 [all-contributors-image]: https://img.shields.io/github/all-contributors/leanflutter/window_manager?color=ee8449&style=flat-square
 
 这个插件允许 Flutter 桌面应用调整窗口的大小和位置。
@@ -58,6 +57,10 @@
       - [restore](#restore)
       - [isFullScreen](#isfullscreen)
       - [setFullScreen](#setfullscreen)
+      - [isDockable  `windows`](#isdockable--windows)
+      - [isDocked  `windows`](#isdocked--windows)
+      - [dock  `windows`](#dock--windows)
+      - [undock  `windows`](#undock--windows)
       - [setAspectRatio](#setaspectratio)
       - [setBackgroundColor](#setbackgroundcolor)
       - [setAlignment](#setalignment)
@@ -77,13 +80,13 @@
       - [isMinimizable  `macos`  `windows`](#isminimizable--macos--windows)
       - [setMinimizable  `macos`  `windows`](#setminimizable--macos--windows)
       - [isClosable  `windows`](#isclosable--windows)
-      - [isMaximizable `macos` `windows`](#ismaximizable--macos--windows)
+      - [isMaximizable  `macos`  `windows`](#ismaximizable--macos--windows)
       - [setMaximizable](#setmaximizable)
       - [setClosable  `macos`  `windows`](#setclosable--macos--windows)
       - [isAlwaysOnTop](#isalwaysontop)
       - [setAlwaysOnTop](#setalwaysontop)
       - [isAlwaysOnBottom](#isalwaysonbottom)
-      - [setAlwaysOnBottom  `linux` `windows`](#setalwaysonbottom--linux--windows)
+      - [setAlwaysOnBottom  `linux`  `windows`](#setalwaysonbottom--linux--windows)
       - [getTitle](#gettitle)
       - [setTitle](#settitle)
       - [setTitleBarStyle](#settitlebarstyle)
@@ -92,6 +95,9 @@
       - [setSkipTaskbar](#setskiptaskbar)
       - [setProgressBar  `macos`  `windows`](#setprogressbar--macos--windows)
       - [setIcon  `windows`](#seticon--windows)
+      - [isVisibleOnAllWorkspaces  `macos`](#isvisibleonallworkspaces--macos)
+      - [setVisibleOnAllWorkspaces  `macos`](#setvisibleonallworkspaces--macos)
+      - [setBadgeLabel  `macos`](#setbadgelabel--macos)
       - [hasShadow  `macos`  `windows`](#hasshadow--macos--windows)
       - [setHasShadow  `macos`  `windows`](#sethasshadow--macos--windows)
       - [getOpacity](#getopacity)
@@ -117,7 +123,10 @@
       - [onWindowMoved  `macos`  `windows`](#onwindowmoved--macos--windows)
       - [onWindowEnterFullScreen](#onwindowenterfullscreen)
       - [onWindowLeaveFullScreen](#onwindowleavefullscreen)
+      - [onWindowDocked  `windows`](#onwindowdocked--windows)
+      - [onWindowUndocked  `windows`](#onwindowundocked--windows)
       - [onWindowEvent](#onwindowevent)
+- [贡献者](#%E8%B4%A1%E7%8C%AE%E8%80%85)
 - [许可证](#%E8%AE%B8%E5%8F%AF%E8%AF%81)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -136,7 +145,7 @@
 
 ```yaml
 dependencies:
-  window_manager: ^0.3.4
+  window_manager: ^0.4.2
 ```
 
 或
@@ -467,8 +476,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WindowListener {
   @override
   void initState() {
-    windowManager.addListener(this);
     super.initState();
+    windowManager.addListener(this);
   }
 
   @override
@@ -499,6 +508,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
 
 ## 谁在用使用它？
 
+- [Airclap](https://airclap.app/) - 任何文件，任意设备，随意发送。简单好用的跨平台高速文件传输APP。
 - [AuthPass](https://authpass.app/) - 基于Flutter的密码管理器，适用于所有平台。兼容Keepass 2.x（kdbx 3.x）。
 - [Biyi (比译)](https://biyidev.com/) - 一个便捷的翻译和词典应用程序。
 - [BlueBubbles](https://github.com/BlueBubblesApp/bluebubbles-app) - BlueBubbles is an ecosystem of apps bringing iMessage to Android, Windows, and Linux
@@ -506,6 +516,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
 - [Linwood Butterfly](https://github.com/LinwoodCloud/Butterfly) - 用 Flutter 编写的开源笔记应用
 - [RustDesk](https://github.com/rustdesk/rustdesk) - 远程桌面软件，开箱即用，无需任何配置。您完全掌控数据，不用担心安全问题。
 - [Ubuntu Desktop Installer](https://github.com/canonical/ubuntu-desktop-installer) - This project is a modern implementation of the Ubuntu Desktop installer.
+- [UniControlHub](https://github.com/rohitsangwan01/uni_control_hub) - Seamlessly bridge your Desktop and Mobile devices
 
 ## API
 
@@ -593,6 +604,26 @@ Returns `bool` - Whether the window is in fullscreen mode.
 
 Sets whether the window should be in fullscreen mode.
 
+##### isDockable  `windows`
+
+Returns `bool` - Whether the window is dockable or not.
+
+
+##### isDocked  `windows`
+
+Returns `bool` - Whether the window is docked.
+
+
+##### dock  `windows`
+
+Docks the window. only works on Windows
+
+
+##### undock  `windows`
+
+Undocks the window. only works on Windows
+
+
 ##### setAspectRatio
 
 This will make a window maintain an aspect ratio.
@@ -674,7 +705,7 @@ Sets whether the window can be manually minimized by user.
 Returns `bool` - Whether the window can be manually closed by user.
 
 
-##### isMaximizable  `windows`
+##### isMaximizable  `macos`  `windows`
 
 Returns `bool` - Whether the window can be manually maximized by the user.
 
@@ -869,6 +900,16 @@ Emitted when the window enters a full-screen state.
 ##### onWindowLeaveFullScreen
 
 Emitted when the window leaves a full-screen state.
+
+##### onWindowDocked  `windows`
+
+Emitted when the window entered a docked state.
+
+
+##### onWindowUndocked  `windows`
+
+Emitted when the window leaves a docked state.
+
 
 ##### onWindowEvent
 

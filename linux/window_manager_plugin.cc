@@ -148,6 +148,27 @@ static FlMethodResponse* minimize(WindowManagerPlugin* self) {
   return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
 }
 
+static FlMethodResponse* is_dockable(WindowManagerPlugin* self) {
+  bool is_docked = false;
+  g_autoptr(FlValue) result = fl_value_new_bool(is_docked);
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+}
+
+static FlMethodResponse* is_docked(WindowManagerPlugin* self) {
+  g_autoptr(FlValue) result = fl_value_new_null();
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+}
+
+static FlMethodResponse* dock(WindowManagerPlugin* self) {
+  g_autoptr(FlValue) result = fl_value_new_bool(true);
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+}
+
+static FlMethodResponse* undock(WindowManagerPlugin* self) {
+  g_autoptr(FlValue) result = fl_value_new_bool(true);
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+}
+
 static FlMethodResponse* restore(WindowManagerPlugin* self) {
   gtk_window_deiconify(get_window(self));
   gtk_window_present(get_window(self));
@@ -830,6 +851,14 @@ static void window_manager_plugin_handle_method_call(
     response = minimize(self);
   } else if (g_strcmp0(method, "restore") == 0) {
     response = restore(self);
+  } else if (g_strcmp0(method, "isDockable") == 0) {
+    response = is_dockable(self);
+  } else if (g_strcmp0(method, "isDocked") == 0) {
+    response = is_docked(self);
+  } else if (g_strcmp0(method, "dock") == 0) {
+    response = dock(self);
+  } else if (g_strcmp0(method, "undock") == 0) {
+    response = undock(self);
   } else if (g_strcmp0(method, "isFullScreen") == 0) {
     response = is_full_screen(self);
   } else if (g_strcmp0(method, "setFullScreen") == 0) {
@@ -1063,6 +1092,14 @@ void window_manager_plugin_register_with_registrar(
   plugin->window_geometry.min_height = -1;
   plugin->window_geometry.max_width = G_MAXINT;
   plugin->window_geometry.max_height = G_MAXINT;
+
+  // Disconnect all delete-event handlers first in flutter 3.10.1, which causes delete_event not working.
+  // Issues from flutter/engine: https://github.com/flutter/engine/pull/40033 
+  guint handler_id = g_signal_handler_find(get_window(plugin), G_SIGNAL_MATCH_DATA, 0, 0, NULL, NULL, fl_plugin_registrar_get_view(plugin->registrar));
+  if (handler_id > 0) {
+    g_signal_handler_disconnect(get_window(plugin), handler_id);
+  }
+
   g_signal_connect(get_window(plugin), "delete_event",
                    G_CALLBACK(on_window_close), plugin);
   g_signal_connect(get_window(plugin), "focus-in-event",
